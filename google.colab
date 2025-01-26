@@ -1,0 +1,160 @@
+# Install necessary libraries (uncomment if needed)
+# !pip install requests pandas numpy matplotlib
+
+# Import libraries
+import requests
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import time
+
+def fetch_stock_data(symbol, api_key):
+    """
+    Fetch daily stock data using the Marketstack API.
+    Args:
+        symbol (str): Stock symbol (e.g., 'AAPL').
+        api_key (str): Marketstack API key.
+    Returns:
+        pd.DataFrame: Dataframe containing stock data.
+    """
+    # Define dynamic time range: past year
+    current_time = pd.Timestamp.now()
+    one_year_ago = current_time - pd.DateOffset(years=1)
+
+    url = f"http://api.marketstack.com/v1/eod?access_key={api_key}&symbols={symbol}&date_from={one_year_ago.date()}&date_to={current_time.date()}"
+    response = requests.get(url)
+    if response.status_code == 200:
+        data = response.json()
+        if "data" in data and len(data["data"]) > 0:
+            df = pd.DataFrame(data["data"])
+            df["Date"] = pd.to_datetime(df["date"])
+            df = df.rename(columns={
+                "open": "Open",
+                "high": "High",
+                "low": "Low",
+                "close": "Close",
+                "volume": "Volume"
+            })
+            df = df[["Date", "Open", "High", "Low", "Close", "Volume"]]
+            df.set_index("Date", inplace=True)
+            df.sort_index(inplace=True)
+            return df
+        else:
+            print("Error in API response: No data available.")
+    else:
+        print(f"HTTP Error {response.status_code}: {response.text}")
+    return None
+
+def calculate_technical_indicators(df):
+    """
+    Add technical indicators to the stock data.
+    Args:
+        df (pd.DataFrame): Dataframe containing stock data.
+    Returns:
+        pd.DataFrame: Dataframe with added technical indicators.
+    """
+    # Simple Moving Average (SMA)
+    df["SMA_20"] = df["Close"].rolling(window=20).mean()
+
+    # Exponential Moving Average (EMA)
+    df["EMA_20"] = df["Close"].ewm(span=20, adjust=False).mean()
+
+    # Relative Strength Index (RSI)
+    delta = df["Close"].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / loss
+    df["RSI"] = 100 - (100 / (1 + rs))
+
+    # Bollinger Bands
+    df["BB_Middle"] = df["Close"].rolling(window=20).mean()
+    df["BB_Upper"] = df["BB_Middle"] + (df["Close"].rolling(window=20).std() * 2)
+    df["BB_Lower"] = df["BB_Middle"] - (df["Close"].rolling(window=20).std() * 2)
+
+    # Moving Average Convergence Divergence (MACD)
+    ema_12 = df["Close"].ewm(span=12, adjust=False).mean()
+    ema_26 = df["Close"].ewm(span=26, adjust=False).mean()
+    df["MACD"] = ema_12 - ema_26
+    df["Signal_Line"] = df["MACD"].ewm(span=9, adjust=False).mean()
+
+    # Lagged Features
+    df["Lagged_Close_1"] = df["Close"].shift(1)
+    df["Lagged_Close_2"] = df["Close"].shift(2)
+
+    return df.dropna()
+
+def visualize_stock_data(df, stock_symbol):
+    """
+    Create visualizations for the stock data and technical indicators.
+    Args:
+        df (pd.DataFrame): Dataframe containing stock data and indicators.
+        stock_symbol (str): Stock symbol.
+    """
+    plt.figure(figsize=(15, 8))
+
+    # Plot Closing Price with SMA and EMA
+    plt.subplot(2, 2, 1)
+    plt.plot(df.index, df["Close"], label="Closing Price", color="blue")
+    plt.plot(df.index, df["SMA_20"], label="20-Day SMA", color="orange")
+    plt.plot(df.index, df["EMA_20"], label="20-Day EMA", color="green")
+    plt.title(f"{stock_symbol} - Closing Price with SMA and EMA")
+    plt.xlabel("Date")
+    plt.ylabel("Price ($)")
+    plt.legend()
+
+    # Plot RSI
+    plt.subplot(2, 2, 2)
+    plt.plot(df.index, df["RSI"], label="RSI", color="purple")
+    plt.axhline(70, color="red", linestyle="--", label="Overbought")
+    plt.axhline(30, color="green", linestyle="--", label="Oversold")
+    plt.title(f"{stock_symbol} - Relative Strength Index (RSI)")
+    plt.xlabel("Date")
+    plt.ylabel("RSI")
+    plt.legend()
+
+    # Plot Bollinger Bands
+    plt.subplot(2, 2, 3)
+    plt.plot(df.index, df["Close"], label="Closing Price", color="blue")
+    plt.plot(df.index, df["BB_Middle"], label="Middle Band", color="orange")
+    plt.plot(df.index, df["BB_Upper"], label="Upper Band", color="green")
+    plt.plot(df.index, df["BB_Lower"], label="Lower Band", color="red")
+    plt.title(f"{stock_symbol} - Bollinger Bands")
+    plt.xlabel("Date")
+    plt.ylabel("Price ($)")
+    plt.legend()
+
+    # Plot MACD
+    plt.subplot(2, 2, 4)
+    plt.plot(df.index, df["MACD"], label="MACD", color="blue")
+    plt.plot(df.index, df["Signal_Line"], label="Signal Line", color="orange")
+    plt.title(f"{stock_symbol} - MACD")
+    plt.xlabel("Date")
+    plt.ylabel("MACD")
+    plt.legend()
+
+    plt.tight_layout()
+    plt.show()
+
+# Replace with your Marketstack API key
+api_key = "9637122595cfe95b46234169ce0d7bcd"
+stock_symbol = input("Enter Stock Symbol (e.g., AAPL): ")
+
+# Fetch stock data
+stock_data = fetch_stock_data(stock_symbol, api_key)
+if stock_data is not None:
+    print("Stock data fetched successfully!")
+    stock_data = calculate_technical_indicators(stock_data)
+    print(stock_data.head())
+
+    # Save to CSV
+    stock_data.to_csv("enhanced_stock_data.csv")
+    print("Enhanced stock data saved to 'enhanced_stock_data.csv'.")
+
+    # Visualize data
+    visualize_stock_data(stock_data, stock_symbol)
+else:
+    print("Failed to fetch stock data. Please check the stock symbol and API key.")
+
+!git add requirements.txt
+!git commit -m "Update requirements.txt with matplotlib"
+!git push
